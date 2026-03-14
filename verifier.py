@@ -8,8 +8,8 @@
 # Student Information
 ############################################
 # TODO fill in your information. Without this information you will not get any grades
-STUDENT_NAME = "Your Name"
-ROLL_NUMBER = "Your Roll Number"
+STUDENT_NAME = "Lakshya Singhal"
+ROLL_NUMBER = "23075043"
 
 
 ##################################################
