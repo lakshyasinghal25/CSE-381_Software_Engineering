@@ -16,10 +16,19 @@ ROLL_NUMBER = "23075043"
 # AST DEFINITIONS
 ##################################################
 
+# Base Classes
 class Stmt:
     pass
 
 
+class Expr:
+    pass
+
+
+class BExpr:
+    pass
+
+# Classes representing statement nodes
 class Assign(Stmt):
     def __init__(self, var, expr):
         self.var = var
@@ -45,6 +54,36 @@ class While(Stmt):
         self.body = body
         self.invariant = invariant
 
+
+# Classes representing Arithmetic Expression nodes
+class Int(Expr):
+    def __init__(self, val):
+        self.val = val
+    
+
+class Var(Expr):
+    def __init__(self, var):
+        self.var = var
+
+
+class Binary(Expr):
+    def __init__(self, left, right, operator):
+        self.left = left
+        self.right = right
+        self.operator = operator
+
+
+# Classes representing Boolean Expression nodes
+class BoolBinary(BExpr):
+    def __init__(self, left, right, operator):
+        self.left = left
+        self.right = right
+        self.operator = operator
+
+
+class Unary(BExpr):
+    def __init__(self, bexpr):
+        self.bexpr = bexpr
 
 ##################################################
 # HELPER FUNCTIONS (DO NOT MODIFY)
