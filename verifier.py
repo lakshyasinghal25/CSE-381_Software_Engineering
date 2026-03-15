@@ -57,9 +57,9 @@ class While(Stmt):
 
 
 # Classes representing Arithmetic Expression nodes
-class Int(Expr):
-    def __init__(self, val):
-        self.val = val
+class IntConst(Expr):
+    def __init__(self, name):
+        self.name = name
     
 
 class Var(Expr):
@@ -67,25 +67,30 @@ class Var(Expr):
         self.var = var
 
 
-class Binary(Expr):
-    def __init__(self, left, right, operator):
+class BinOp(Expr):
+    def __init__(self, left, right, op):
         self.left = left
         self.right = right
-        self.operator = operator
+        self.op = op
 
 
 # Classes representing Boolean Expression nodes
-class BoolBinary(BExpr):
-    def __init__(self, left, right, operator):
-        self.left = left
-        self.right = right
-        self.operator = operator
+class RelOp(BExpr):
+    def __init__(self, op, left, right):
+        self.op = op            # "==", "<", "<=", ">", ">="
+        self.left = left    
+        self.right = right 
+
+class BoolOp(BExpr):
+    def __init__(self, op, left, right):
+        self.op = op            # "and", "or"
+        self.left = left 
+        self.right = right 
 
 
-class Unary(BExpr):
-    def __init__(self, bexpr, operator):
-        self.bexpr = bexpr
-        self.operator = operator
+class Not(BExpr):
+    def __init__(self, operand):
+        self.operand = operand
 
 ##################################################
 # HELPER FUNCTIONS (DO NOT MODIFY)
@@ -246,7 +251,7 @@ def parse_program(program_text):
         while match(["or"]):
             operator = previous()
             right = parse_and()
-            ast = BoolBinary(ast, right, operator)
+            ast = BoolOp(operator, ast, right)
         
         return ast
     
@@ -256,15 +261,14 @@ def parse_program(program_text):
         while match(["and"]):
             operator = previous()
             right = parse_not()
-            ast = BoolBinary(ast, right, operator)
+            ast = BoolOp(operator, ast, right)
 
         return ast
     
     def parse_not():
         if match(["not"]):
-            operator = previous()
             right = parse_not()
-            return Unary(right, operator)
+            return Not(right)
         
         return parse_equality()
     
@@ -274,7 +278,7 @@ def parse_program(program_text):
         while match(["==", "!="]):
             operator = previous()
             right = parse_comparison()
-            ast = BoolBinary(ast, right, operator)
+            ast = RelOp(operator, ast, right)
 
         return ast
     
@@ -284,7 +288,7 @@ def parse_program(program_text):
         while match(["<", ">", "<=", ">="]):
             operator = previous()
             right = parse_term()
-            ast = BoolBinary(ast, right, operator)
+            ast = RelOp(operator, ast, right)
 
         return ast
 
@@ -294,7 +298,7 @@ def parse_program(program_text):
         while match(["+", "-"]):
             operator = previous()
             right = parse_factor()
-            ast = Binary(ast, right, operator)
+            ast = BinOp(ast, right, operator)
 
         return ast
     
@@ -304,13 +308,13 @@ def parse_program(program_text):
         while match(["/", "*"]):
             operator = previous()
             right = parse_primary()
-            ast = Binary(ast, right, operator)
+            ast = BinOp(ast, right, operator)
 
         return ast
     
     def parse_primary():
         if match([r'\d']):
-            return Int(previous())
+            return IntConst(previous())
         
         elif match([r'[a-zA-Z_][a-zA-Z0-9_]*']):
             return Var(previous())
@@ -437,7 +441,7 @@ def verify_while(stmt, pre, post):
 
 # Testing..,
 
-program_text = "while(x > 0) invariant(x = 0) {x = x + 2; y = y-1;}"
+program_text = "while(x > 0) invariant(x == 0) {x = x + 2; y = y-1;}"
 pre = "True"
 post = "True"
 
