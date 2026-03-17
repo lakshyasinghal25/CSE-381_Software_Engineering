@@ -115,7 +115,7 @@ def get_var(name):
 
 def to_z3_expr(expr: Expr):
     if isinstance(expr, IntConst):
-        return expr.value         
+        return z3.IntVal(expr.value)
 
     elif isinstance(expr, Var):
         return get_var(expr.var)   
@@ -170,6 +170,9 @@ def substitute(formula, var_name, expr):
     # Z3 has a built-in function for this:
     z3_var = get_var(var_name)
     z3_expr = to_z3_expr(expr)
+
+    # print(z3_var, z3_expr)
+    # print(type(z3_var), type(z3_expr))
     return z3.substitute(formula, (z3_var, z3_expr))
 
 def collect_vars(node):
@@ -193,6 +196,11 @@ def collect_vars(node):
         return collect_vars(node.operand)
     else:
         return set()
+    
+
+def get_pre_assign(stmt, post):
+    return substitute(post, stmt.var, stmt.expr)
+
     
 ##################################################
 # PARSER
@@ -262,18 +270,15 @@ def parse_program(program_text):
     ##################
 
     def stmt_list():
-        ast = stmt()
+        first = stmt()
 
-        while match([";"]):
-            if isAtEnd() or check("}"):
-                break;
-            second = stmt()
-            ast = Sequence(ast, second)
-        
-        if (not isAtEnd()) and (not check("}")):
-            raise error(peek(), "Expected end of line")
+        if match([";"]):
+            if isAtEnd() or check("}"):   # trailing semicolon, nothing follows
+                return first
+            second = stmt_list()          # ← recurse instead of loop
+            return Sequence(first, second)
 
-        return ast
+        return first
     
     def stmt():
         if match(["while"]):
@@ -478,9 +483,7 @@ def verify_assign(stmt, pre, post):
 
     # TODO: Implement assignment verification
 
-    post = substitute(post, stmt.var, stmt.expr)
-    formula = z3.Implies(pre, post)
-    return check_valid(formula)
+    return check_valid(z3.Implies(pre, get_pre_assign(stmt, post)))
 
 
 ##################################################
@@ -494,7 +497,8 @@ def verify_sequence(stmt, pre, post):
     """
 
     # TODO: Implement sequence rule
-    raise NotImplementedError
+
+    return verify_stmt(stmt.first, pre, get_pre_assign(stmt.second, post))
 
 
 ##################################################
@@ -508,7 +512,12 @@ def verify_if(stmt, pre, post):
     """
 
     # TODO: Implement if-else verification
-    raise NotImplementedError
+
+    cond = to_z3_bexpr(stmt.cond)
+    verify_then = verify_stmt(stmt.then_branch, z3.And(pre, cond), post)
+    verify_else = verify_stmt(stmt.else_branch, z3.And(pre, z3.Not(cond)), post)
+
+    return verify_then and verify_else
 
 
 ##################################################
@@ -526,14 +535,21 @@ def verify_while(stmt, pre, post):
     2. {invariant ∧ cond} body {invariant}
     3. (invariant ∧ ¬cond) ⇒ post
     """
-
     # TODO: Implement while verification
-    raise NotImplementedError
 
-# Testing..,
+    cond = to_z3_bexpr(stmt.cond)
+    invariant = to_z3_bexpr(stmt.invariant)
 
-program_text = "x = x + 65"
-pre = "x >= 1"
-post = "x >= 8"
+    intialization = check_valid(z3.Implies(pre, invariant))
+    preservation = verify_stmt(stmt.body, z3.And(cond, invariant), invariant)
+    exit_condition = check_valid(z3.Implies(z3.And(invariant, z3.Not(cond)), post))
+
+    return intialization and preservation and exit_condition
+
+# Testing...
+
+program_text = "while (x > 0) invariant (x >= 0) {x = x - 1}"
+pre = "x == 0"
+post = "x == 0"
 
 print(verify(program_text, pre, post))
