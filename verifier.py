@@ -4,6 +4,7 @@
 # Do not import any libraries here
 
 import re
+import z3
 
 ############################################
 # Student Information
@@ -58,8 +59,8 @@ class While(Stmt):
 
 # Classes representing Arithmetic Expression nodes
 class IntConst(Expr):
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, value):
+        self.value = value
     
 
 class Var(Expr):
@@ -88,7 +89,7 @@ class BoolOp(BExpr):
         self.right = right 
 
 
-class Not(BExpr):
+class NotOp(BExpr):
     def __init__(self, operand):
         self.operand = operand
 
@@ -100,18 +101,99 @@ def check_valid(formula):
     """
     Returns True if the formula is valid.
     """
-    s = Solver()
-    s.add(Not(formula))
-    return s.check() == unsat
+    s = z3.Solver()
+    s.add(z3.Not(formula))
+    return s.check() == z3.unsat
 
 
 def get_var(name):
     """
     Creates a Z3 integer variable with the given name.
     """
-    return Int(name)
+    return z3.Int(name)
 
 
+def to_z3_expr(expr: Expr):
+    if isinstance(expr, IntConst):
+        return expr.value         
+
+    elif isinstance(expr, Var):
+        return get_var(expr.var)   
+
+    elif isinstance(expr, BinOp):
+        left  = to_z3_expr(expr.left)   
+        right = to_z3_expr(expr.right) 
+
+        if expr.op == '+':
+            return left + right
+        elif expr.op == '-':
+            return left - right
+        elif expr.op == '*':
+            return left * right
+        else:
+            raise ValueError(f"Unknown operator: {expr.op}")
+
+    else:
+        raise ValueError(f"Unknown expression type: {type(expr)}")
+
+
+def to_z3_bexpr(bexpr):
+    if isinstance(bexpr, RelOp):
+        left  = to_z3_expr(bexpr.left)
+        right = to_z3_expr(bexpr.right)
+
+        if bexpr.op == '==':   return left == right
+        elif bexpr.op == '>':  return left > right
+        elif bexpr.op == '>=': return left >= right
+        elif bexpr.op == '<':  return left < right
+        elif bexpr.op == '<=': return left <= right
+        else:
+            raise ValueError(f"Unknown operator: {bexpr.op}")
+
+    elif isinstance(bexpr, BoolOp):
+        left  = to_z3_bexpr(bexpr.left)
+        right = to_z3_bexpr(bexpr.right)
+
+        if bexpr.op == 'and':  return z3.And(left, right)
+        elif bexpr.op == 'or': return z3.Or(left, right)
+        else:
+            raise ValueError(f"Unknown operator: {bexpr.op}")
+
+    elif isinstance(bexpr, NotOp):              # your class is NotOp
+        return z3.Not(to_z3_bexpr(bexpr.operand))
+
+    else:
+        raise ValueError(f"Unknown bexpr type: {type(bexpr)}")
+    
+
+def substitute(formula, var_name, expr):
+    # Z3 has a built-in function for this:
+    z3_var = get_var(var_name)
+    z3_expr = to_z3_expr(expr)
+    return z3.substitute(formula, (z3_var, z3_expr))
+
+def collect_vars(node):
+    if isinstance(node, Assign):
+        return {node.var} | collect_vars(node.expr)
+    elif isinstance(node, Var):
+        return {node.var}
+    elif isinstance(node, IntConst):
+        return set()
+    elif isinstance(node, BinOp):
+        return collect_vars(node.left) | collect_vars(node.right)
+    elif isinstance(node, Sequence):
+        return collect_vars(node.first) | collect_vars(node.second)
+    elif isinstance(node, IfElse):
+        return collect_vars(node.cond) | collect_vars(node.then_branch) | collect_vars(node.else_branch)
+    elif isinstance(node, While):
+        return collect_vars(node.cond) | collect_vars(node.body) | collect_vars(node.invariant)
+    elif isinstance(node, RelOp) or isinstance(node, BoolOp):
+        return collect_vars(node.left) | collect_vars(node.right)
+    elif isinstance(node, NotOp):
+        return collect_vars(node.operand)
+    else:
+        return set()
+    
 ##################################################
 # PARSER
 ##################################################
@@ -268,7 +350,7 @@ def parse_program(program_text):
     def parse_not():
         if match(["not"]):
             right = parse_not()
-            return Not(right)
+            return NotOp(right)
         
         return parse_equality()
     
@@ -313,7 +395,7 @@ def parse_program(program_text):
         return ast
     
     def parse_primary():
-        if match([r'\d']):
+        if match([r'\d+']):
             return IntConst(previous())
         
         elif match([r'[a-zA-Z_][a-zA-Z0-9_]*']):
@@ -346,9 +428,15 @@ def verify(program_text: str, pre: str, post: str) -> bool:
 
     ast = parse_program(program_text)
 
-    # Convert pre/post strings into Z3 expressions
-    pre_formula = eval(pre)
-    post_formula = eval(post)
+    # Step 1: collect all variable names used in the program
+    variables = collect_vars(ast)
+
+    # Step 2: create Z3 Int variables and put them in a local dict
+    z3_vars = {name: z3.Int(name) for name in variables}
+
+    # Step 3: eval with those variables in scope
+    pre_formula  = eval(pre,  {"__builtins__": {}}, z3_vars)
+    post_formula = eval(post, {"__builtins__": {}}, z3_vars)
 
     return verify_stmt(ast, pre_formula, post_formula)
 
@@ -362,20 +450,20 @@ def verify_stmt(stmt, pre, post):
     Dispatch to the correct verification rule.
     """
 
-    # if isinstance(stmt, Assign):
-    #     return verify_assign(stmt, pre, post)
+    if isinstance(stmt, Assign):
+        return verify_assign(stmt, pre, post)
 
-    # elif isinstance(stmt, Sequence):
-    #     return verify_sequence(stmt, pre, post)
+    elif isinstance(stmt, Sequence):
+        return verify_sequence(stmt, pre, post)
 
-    # elif isinstance(stmt, IfElse):
-    #     return verify_if(stmt, pre, post)
+    elif isinstance(stmt, IfElse):
+        return verify_if(stmt, pre, post)
 
-    # elif isinstance(stmt, While):
-    #     return verify_while(stmt, pre, post)
+    elif isinstance(stmt, While):
+        return verify_while(stmt, pre, post)
 
-    # else:
-    #     raise Exception("Unknown statement type")
+    else:
+        raise Exception("Unknown statement type")
 
 
 ##################################################
@@ -389,7 +477,10 @@ def verify_assign(stmt, pre, post):
     """
 
     # TODO: Implement assignment verification
-    raise NotImplementedError
+
+    post = substitute(post, stmt.var, stmt.expr)
+    formula = z3.Implies(pre, post)
+    return check_valid(formula)
 
 
 ##################################################
@@ -441,8 +532,8 @@ def verify_while(stmt, pre, post):
 
 # Testing..,
 
-program_text = "while(x > 0) invariant(x == 0) {x = x + 2; y = y-1;}"
-pre = "True"
-post = "True"
+program_text = "x = x + 65"
+pre = "x >= 1"
+post = "x >= 8"
 
 print(verify(program_text, pre, post))
